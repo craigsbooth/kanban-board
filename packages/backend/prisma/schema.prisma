@@ -1,0 +1,392 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  ownedBoards     Board[]
+  boardMemberships BoardMember[]
+  createdCards    Card[]        @relation("CardCreator")
+  assignedCards   Card[]        @relation("CardAssignee")
+  cardSubscriptions CardSubscription[]
+  comments        Comment[]
+  timeEntries     TimeEntry[]
+
+  @@map("users")
+}
+
+model Board {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  inviteToken String   @unique @default(cuid()) @map("invite_token")
+  ownerId     String   @map("owner_id")
+  templateType String  @default("basic") @map("template_type") // basic, kanban, scrum
+  agileConfig Json?    @map("agile_config") // JSON configuration for Agile features
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  owner     User          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  members   BoardMember[]
+  columns   Column[]
+  swimLanes SwimLane[]
+  cards     Card[]
+  sprints   Sprint[]
+  labels    BoardLabel[]
+  workflows Workflow[]
+
+  @@map("boards")
+}
+
+model BoardMember {
+  id       String          @id @default(cuid())
+  boardId  String          @map("board_id")
+  userId   String          @map("user_id")
+  role     BoardMemberRole @default(VIEW)
+  joinedAt DateTime        @default(now()) @map("joined_at")
+
+  // Relations
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([boardId, userId])
+  @@map("board_members")
+}
+
+model Column {
+  id       String @id @default(cuid())
+  boardId  String @map("board_id")
+  name     String
+  position Int
+  color    String?
+
+  // Relations
+  board Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  cards Card[]
+
+  @@unique([boardId, position])
+  @@map("columns")
+}
+
+model SwimLane {
+  id       String           @id @default(cuid())
+  boardId  String           @map("board_id")
+  name     String
+  position Int
+  category SwimLaneCategory @default(CUSTOM)
+  color    String?
+
+  // Relations
+  board Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  cards Card[]
+
+  @@unique([boardId, position])
+  @@map("swim_lanes")
+}
+
+model Card {
+  id          String    @id @default(cuid())
+  boardId     String    @map("board_id")
+  columnId    String    @map("column_id")
+  swimLaneId  String?   @map("swim_lane_id")
+  title       String
+  description String?
+  position    Int
+  dueDate     DateTime? @map("due_date")
+  createdBy   String    @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  
+  // Agile-specific fields
+  storyPoints      Int?    @map("story_points")
+  originalEstimate Int?    @map("original_estimate") // hours
+  timeSpent        Int     @default(0) @map("time_spent") // hours
+  remainingEstimate Int?   @map("remaining_estimate") // hours
+  priority         String  @default("medium") // highest, high, medium, low, lowest
+  issueType        String  @default("task") @map("issue_type") // story, bug, task, epic
+
+  // Relations
+  board        Board              @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  column       Column             @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  swimLane     SwimLane?          @relation(fields: [swimLaneId], references: [id], onDelete: SetNull)
+  creator      User               @relation("CardCreator", fields: [createdBy], references: [id])
+  assignees    User[]             @relation("CardAssignee")
+  labels       Label[]
+  attachments  Attachment[]
+  customFields CustomField[]
+  checklists   Checklist[]
+  comments     Comment[]
+  subscriptions CardSubscription[]
+  
+  // Agile relations
+  sprintCards  SprintCard[]
+  epicLinks    EpicLink[]         @relation("EpicCard")
+  storyLinks   EpicLink[]         @relation("StoryCard")
+  timeEntries  TimeEntry[]
+  cardLabels   CardLabel[]
+
+  @@unique([columnId, position])
+  @@map("cards")
+}
+
+model Label {
+  id      String @id @default(cuid())
+  cardId  String @map("card_id")
+  name    String
+  color   String
+  boardId String @map("board_id")
+
+  // Relations
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@map("labels")
+}
+
+model Attachment {
+  id       String   @id @default(cuid())
+  cardId   String   @map("card_id")
+  filename String
+  url      String
+  size     Int
+  mimeType String   @map("mime_type")
+  uploadedAt DateTime @default(now()) @map("uploaded_at")
+
+  // Relations
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@map("attachments")
+}
+
+model CustomField {
+  id     String          @id @default(cuid())
+  cardId String          @map("card_id")
+  name   String
+  type   CustomFieldType
+  value  String // JSON string for complex values
+
+  // Relations
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@map("custom_fields")
+}
+
+model Checklist {
+  id     String @id @default(cuid())
+  cardId String @map("card_id")
+  title  String
+
+  // Relations
+  card  Card           @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  items ChecklistItem[]
+
+  @@map("checklists")
+}
+
+model ChecklistItem {
+  id          String  @id @default(cuid())
+  checklistId String  @map("checklist_id")
+  text        String
+  completed   Boolean @default(false)
+  position    Int
+
+  // Relations
+  checklist Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@unique([checklistId, position])
+  @@map("checklist_items")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  cardId    String   @map("card_id")
+  userId    String   @map("user_id")
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("comments")
+}
+
+model CardSubscription {
+  id        String   @id @default(cuid())
+  cardId    String   @map("card_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([cardId, userId])
+  @@map("card_subscriptions")
+}
+
+// Agile-specific models
+
+model Sprint {
+  id        String      @id @default(cuid())
+  boardId   String      @map("board_id")
+  name      String
+  goal      String?
+  startDate DateTime    @map("start_date")
+  endDate   DateTime    @map("end_date")
+  status    SprintStatus @default(PLANNING)
+  capacity  Int?        // story points
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  board           Board              @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  sprintCards     SprintCard[]
+  burndownSnapshots BurndownSnapshot[]
+
+  @@map("sprints")
+}
+
+model SprintCard {
+  sprintId    String    @map("sprint_id")
+  cardId      String    @map("card_id")
+  addedAt     DateTime  @default(now()) @map("added_at")
+  completedAt DateTime? @map("completed_at")
+  storyPoints Int?      @map("story_points")
+
+  // Relations
+  sprint Sprint @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+  card   Card   @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@id([sprintId, cardId])
+  @@map("sprint_cards")
+}
+
+model EpicLink {
+  id        String   @id @default(cuid())
+  epicId    String   @map("epic_id")
+  storyId   String   @map("story_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  epic  Card @relation("EpicCard", fields: [epicId], references: [id], onDelete: Cascade)
+  story Card @relation("StoryCard", fields: [storyId], references: [id], onDelete: Cascade)
+
+  @@unique([epicId, storyId])
+  @@map("epic_links")
+}
+
+model TimeEntry {
+  id          String   @id @default(cuid())
+  cardId      String   @map("card_id")
+  userId      String   @map("user_id")
+  timeSpent   Int      @map("time_spent") // minutes
+  description String?
+  loggedAt    DateTime @default(now()) @map("logged_at")
+
+  // Relations
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("time_entries")
+}
+
+model BoardLabel {
+  id        String   @id @default(cuid())
+  boardId   String   @map("board_id")
+  name      String
+  color     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  board      Board       @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  cardLabels CardLabel[]
+
+  @@map("board_labels")
+}
+
+model CardLabel {
+  cardId  String @map("card_id")
+  labelId String @map("label_id")
+
+  // Relations
+  card  Card       @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  label BoardLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([cardId, labelId])
+  @@map("card_labels")
+}
+
+model Workflow {
+  id          String   @id @default(cuid())
+  boardId     String   @map("board_id")
+  name        String
+  issueTypes  Json     @map("issue_types") // array of issue types this workflow applies to
+  statuses    Json     // array of status objects with transitions
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@map("workflows")
+}
+
+model BurndownSnapshot {
+  id              String   @id @default(cuid())
+  sprintId        String   @map("sprint_id")
+  snapshotDate    DateTime @map("snapshot_date") @db.Date
+  remainingPoints Int      @map("remaining_points")
+  completedPoints Int      @map("completed_points")
+  totalPoints     Int      @map("total_points")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // Relations
+  sprint Sprint @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+
+  @@unique([sprintId, snapshotDate])
+  @@map("burndown_snapshots")
+}
+
+// Enums
+enum SprintStatus {
+  PLANNING
+  ACTIVE
+  COMPLETED
+}
+enum BoardMemberRole {
+  OWNER
+  ADMIN
+  EDIT
+  VIEW
+}
+
+enum SwimLaneCategory {
+  PRIORITY
+  TEAM
+  PROJECT
+  CUSTOM
+}
+
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  DATE
+  BOOLEAN
+  SELECT
+}
